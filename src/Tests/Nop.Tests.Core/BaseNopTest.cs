@@ -79,7 +79,6 @@ using Nop.Services.Themes;
 using Nop.Services.Topics;
 using Nop.Services.Vendors;
 using Nop.Tests.Nop.Services.Tests.ScheduleTasks;
-using Nop.Tests.Nop.Web.Tests.Public.Factories;
 using Nop.Web.Areas.Admin.Factories;
 using Nop.Web.Framework;
 using Nop.Web.Framework.Factories;
@@ -111,6 +110,9 @@ public partial class BaseNopTest
 
         dataProvider.CreateDatabase();
         dataProvider.InitializeDatabase();
+
+        //apply additional schema migrations
+        TestMigration.ApplyMigrations(_serviceProvider.GetService<ITypeFinder>(), _serviceProvider.GetService<IMigrationManager>());
 
         var installationService = _serviceProvider.GetService<IInstallationService>();
 
@@ -169,10 +171,21 @@ public partial class BaseNopTest
 
         var services = new ServiceCollection();
 
-        var rootPath =
-            new DirectoryInfo(
-                    $"{Directory.GetCurrentDirectory().Split("bin")[0]}{Path.Combine([.. @"\..\..\Presentation\Nop.Web".Split('\\', '/')])}")
-                .FullName;
+        var rootPath = findRootPath();
+        static string findRootPath()
+        {
+            var presentationPath = @"..\..\Presentation\Nop.Web";
+            var basePath = $"{Directory.GetCurrentDirectory().Split("bin")[0]}";
+            for (var i = 0; i < 3; i++)
+            {
+                if (i > 0)
+                    presentationPath = @"..\" + presentationPath;
+                var directory = new DirectoryInfo($"{basePath}{Path.Combine(presentationPath.Split('\\', '/'))}");
+                if (directory.Exists)
+                    return directory.FullName;
+            }
+            throw new DirectoryNotFoundException();
+        }
 
         //Presentation\Nop.Web\wwwroot
         var webHostEnvironment = new Mock<IWebHostEnvironment>();
@@ -498,8 +511,7 @@ public partial class BaseNopTest
         services.AddTransient<ICustomerRoleModelFactory, CustomerRoleModelFactory>();
         services.AddTransient<IDiscountModelFactory, DiscountModelFactory>();
         services.AddTransient<IEmailAccountModelFactory, EmailAccountModelFactory>();
-        services
-            .AddTransient<IExternalAuthenticationMethodModelFactory, ExternalAuthenticationMethodModelFactory>();
+        services.AddTransient<IExternalAuthenticationMethodModelFactory, ExternalAuthenticationMethodModelFactory>();
         services.AddTransient<IForumModelFactory, ForumModelFactory>();
         services.AddTransient<IGiftCardModelFactory, GiftCardModelFactory>();
         services.AddTransient<IHomeModelFactory, HomeModelFactory>();
@@ -515,7 +527,6 @@ public partial class BaseNopTest
         services.AddTransient<IPluginModelFactory, PluginModelFactory>();
         services.AddTransient<IPollModelFactory, PollModelFactory>();
         services.AddTransient<IProductModelFactory, ProductModelFactory>();
-        services.AddTransient<ProductModelFactoryTests.ProductModelFactoryForTest>();
         services.AddTransient<IProductAttributeModelFactory, ProductAttributeModelFactory>();
         services.AddTransient<IProductReviewModelFactory, ProductReviewModelFactory>();
         services.AddTransient<IReportModelFactory, ReportModelFactory>();
@@ -546,16 +557,13 @@ public partial class BaseNopTest
         services.AddTransient<Web.Factories.ICountryModelFactory, Web.Factories.CountryModelFactory>();
         services.AddTransient<Web.Factories.ICustomerModelFactory, Web.Factories.CustomerModelFactory>();
         services.AddTransient<Web.Factories.IForumModelFactory, Web.Factories.ForumModelFactory>();
-        services
-            .AddTransient<Web.Factories.IExternalAuthenticationModelFactory,
-                Web.Factories.ExternalAuthenticationModelFactory>();
+        services.AddTransient<Web.Factories.IExternalAuthenticationModelFactory, Web.Factories.ExternalAuthenticationModelFactory>();
         services.AddTransient<Web.Factories.IJsonLdModelFactory, Web.Factories.JsonLdModelFactory>();
         services.AddTransient<Web.Factories.INewsModelFactory, Web.Factories.NewsModelFactory>();
         services.AddTransient<Web.Factories.INewsLetterModelFactory, Web.Factories.NewsLetterModelFactory>();
         services.AddTransient<Web.Factories.IOrderModelFactory, Web.Factories.OrderModelFactory>();
         services.AddTransient<Web.Factories.IPollModelFactory, Web.Factories.PollModelFactory>();
-        services
-            .AddTransient<Web.Factories.IPrivateMessagesModelFactory, Web.Factories.PrivateMessagesModelFactory>();
+        services.AddTransient<Web.Factories.IPrivateMessagesModelFactory, Web.Factories.PrivateMessagesModelFactory>();
         services.AddTransient<Web.Factories.IProductModelFactory, Web.Factories.ProductModelFactory>();
         services.AddTransient<Web.Factories.IProfileModelFactory, Web.Factories.ProfileModelFactory>();
         services.AddTransient<Web.Factories.IReturnRequestModelFactory, Web.Factories.ReturnRequestModelFactory>();
@@ -563,6 +571,19 @@ public partial class BaseNopTest
         services.AddTransient<Web.Factories.ISitemapModelFactory, Web.Factories.SitemapModelFactory>();
         services.AddTransient<Web.Factories.ITopicModelFactory, Web.Factories.TopicModelFactory>();
         services.AddTransient<Web.Factories.IVendorModelFactory, Web.Factories.VendorModelFactory>();
+
+        //find additional test services
+        var startupConfigurations = typeFinder.FindClassesOfType<ITestNopStartup>();
+
+        //create and sort instances of startup configurations
+        var instances = startupConfigurations
+            .Select(startup => (ITestNopStartup)Activator.CreateInstance(startup))
+            .Where(startup => startup != null)
+            .OrderBy(startup => startup.Order);
+
+        //configure services
+        foreach (var instance in instances)
+            instance.ConfigureServices(services, null);
 
         _serviceProvider = services.BuildServiceProvider();
 
@@ -603,7 +624,7 @@ public partial class BaseNopTest
                 dataConfig.ConnectionString = NopTestConfiguration.SqliteConnectionString;
                 break;
         }
-       
+
         Singleton<DataConfig>.Instance = dataConfig;
         var flag = !string.IsNullOrEmpty(dataConfig.ConnectionString);
 
